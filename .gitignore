@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Environment
+.env
+.env.local
+
+# Data & output
+*.db
+*.sqlite
+*.sqlite3
+logs/
+output/
+data/raw/*
+!data/raw/.gitkeep
+
+# OS & IDE
+.DS_Store
+.vscode/
+.idea/data/clienti.json
+.env
+clienti.json

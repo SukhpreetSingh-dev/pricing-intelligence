@@ -1,0 +1,22 @@
+[
+  {
+    "id": "cliente_001",
+    "nome": "Example Station North",
+    "email": ["demo@example.com"],
+    "indirizzo": "Via Roma 1, 41100 Modena MO",
+    "raggio_km": 10,
+    "carburanti": ["benzina", "gasolio", "gpl"],
+    "top_n": 5,
+    "is_self": true
+  },
+  {
+    "id": "cliente_002",
+    "nome": "Example Station South",
+    "email": ["demo@example.com"],
+    "indirizzo": "Via Verdi 10, 42100 Reggio Emilia RE",
+    "raggio_km": 7,
+    "carburanti": ["benzina", "gasolio", "gpl", "metano"],
+    "top_n": 10,
+    "is_self": true
+  }
+]
