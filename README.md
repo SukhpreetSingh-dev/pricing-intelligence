@@ -23,6 +23,13 @@ done manually or not at all.
   competitor, per fuel type
 - **Automated email delivery**, one report per client, multiple recipients
 
+
+## Sample output
+
+![Report example](docs/report-example.png)
+
+*Generated with demo locations from the public MIMIT dataset.*
+
 ## Results
 
 - Processes **23,700+ locations** and **74,900+ daily price records**
