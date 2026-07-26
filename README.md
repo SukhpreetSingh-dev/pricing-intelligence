@@ -22,6 +22,7 @@ done manually or not at all.
 - **Competitive ranking**: national position and gap vs the cheapest
   competitor, per fuel type
 - **Automated email delivery**, one report per client, multiple recipients
+- **Graceful degradation**: falls back to cached data when the source is unreachable
 
 
 ## Sample output
