@@ -96,6 +96,13 @@ def main():
         # Analisi posizionamento
         report = analyzer.analizza(cliente, top_n, df_mimit)
 
+        # Debug: salva anteprima HTML per screenshot
+        os.makedirs("output", exist_ok=True)
+        preview_path = f"output/preview_{cliente['id']}.html"
+        with open(preview_path, "w", encoding="utf-8") as f:
+            f.write(notifier._template_html(report))
+        print(f"     💾 Preview salvata → {preview_path}")
+
         # Stampa summary a console
         for riga in report['summary']:
             print(f"     {riga}")

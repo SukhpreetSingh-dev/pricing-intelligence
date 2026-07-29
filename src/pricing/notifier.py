@@ -52,14 +52,14 @@ class PricingNotifier:
 
     def _costruisci_email(self, report: dict) -> MIMEMultipart:
         cliente = report['cliente']
-        oggi    = datetime.now().strftime('%d/%m/%Y')
+        oggi    = datetime.now().strftime('%B %d, %Y')
 
         emails = cliente['email']
         if isinstance(emails, str):
             emails = [emails]
 
         msg = MIMEMultipart('alternative')
-        msg['Subject'] = f"📊 Report Prezzi Carburanti — {oggi}"
+        msg['Subject'] = f"📊 Fuel Price Report — {oggi}"
         msg['From']    = self.mittente
         msg['To']      = ', '.join(emails)   # lista → stringa separata da virgola
 
@@ -68,7 +68,7 @@ class PricingNotifier:
         return msg
     def _template_html(self, report: dict) -> str:
         cliente   = report['cliente']
-        oggi      = datetime.now().strftime('%d/%m/%Y')
+        oggi      = datetime.now().strftime('%B %d, %Y')
         carburanti = report['carburanti']
 
         # Sezioni per ogni carburante
@@ -97,15 +97,15 @@ class PricingNotifier:
             <div style="border-bottom:3px solid #1A56DB;padding-bottom:16px;
                 margin-bottom:24px;">
               <h1 style="color:#1A56DB;font-size:22px;margin:0 0 4px;">
-                📊 Report Prezzi Carburanti</h1>
+                📊 Fuel Price Report</h1>
               <p style="color:#6B7280;font-size:13px;margin:0;">
-                {oggi} — {cliente['nome']} — raggio {cliente['raggio_km']} km
+                {oggi} — {cliente['nome']} — {cliente['raggio_km']} km radius
               </p>
             </div>
 
             <!-- Summary -->
             <h2 style="font-size:15px;color:#374151;margin:0 0 12px;">
-              Riepilogo posizionamento</h2>
+              Positioning summary</h2>
             <table style="width:100%;border-collapse:collapse;
                 background:#F9FAFB;border-radius:8px;margin-bottom:28px;">
               <tbody>{summary_html}</tbody>
@@ -118,8 +118,8 @@ class PricingNotifier:
             <hr style="border:none;border-top:1px solid #E5E7EB;
                 margin:24px 0 16px;">
             <p style="color:#9CA3AF;font-size:12px;margin:0;">
-              ⚠️ Dati aggiornati alle 8:00 del giorno precendente — Fonte: MIMIT Open Data<br>
-              Prezzi self-service. Generato automaticamente.
+              ⚠️ Data updated at 8:00 AM the previous day — Source: MIMIT Open Data<br>
+              Self-service prices. Automatically generated.
             </p>
           </div>
         </div>"""
@@ -143,10 +143,10 @@ class PricingNotifier:
             <div style="background:#F0F9FF;border-left:4px solid {colore};
                 padding:12px 16px;border-radius:4px;margin-bottom:12px;">
               <p style="margin:0;font-size:14px;color:#374151;">
-                <strong>Il tuo prezzo:</strong>
+                <strong>Your price:</strong>
                 €{analisi['prezzo_cliente']:.3f}/L &nbsp;|&nbsp;
-                Posizione <strong>{analisi['posizione']}</strong>
-                su {analisi['totale']} impianti zona
+                Position <strong>{analisi['posizione']}</strong>
+                of {analisi['totale']} stations in the area
               </p>
               <p style="margin:4px 0 0;font-size:13px;color:#6B7280;">
                 {analisi['raccomandazione']}
@@ -172,9 +172,9 @@ class PricingNotifier:
                   <td style="padding:10px 12px;font-weight:600;
                       color:{colore};width:32px;">{pos}</td>
                   <td style="padding:10px 12px;font-size:13px;">
-                    {row.get('bandiera','N/D')}</td>
+                    {row.get('bandiera','N/A')}</td>
                   <td style="padding:10px 12px;font-size:13px;
-                      color:#6B7280;">{row.get('comune','N/D')}</td>
+                      color:#6B7280;">{row.get('comune','N/A')}</td>
                   <td style="padding:10px 12px;font-weight:700;
                       font-size:14px;">€{row['prezzo']:.3f}</td>
                   <td style="padding:10px 12px;font-size:12px;
@@ -183,13 +183,13 @@ class PricingNotifier:
         else:
             righe = """
             <tr><td colspan="5" style="padding:12px;color:#9CA3AF;
-                font-size:13px;">Nessun dato disponibile</td></tr>"""
+                font-size:13px;">No data available</td></tr>"""
 
         return f"""
         <div style="margin-bottom:28px;">
           <h2 style="font-size:16px;color:{colore};margin:0 0 12px;
               text-transform:uppercase;letter-spacing:0.05em;">
-            {carburante} — Top {top_n} più economici</h2>
+            {carburante} — Top {top_n} cheapest</h2>
 
           {prezzo_info}
 
@@ -198,10 +198,10 @@ class PricingNotifier:
             <thead>
               <tr style="background:{colore};color:white;">
                 <th style="padding:10px 12px;text-align:left;">#</th>
-                <th style="padding:10px 12px;text-align:left;">Marchio</th>
-                <th style="padding:10px 12px;text-align:left;">Comune</th>
-                <th style="padding:10px 12px;text-align:left;">Prezzo</th>
-                <th style="padding:10px 12px;text-align:left;">Distanza</th>
+                <th style="padding:10px 12px;text-align:left;">Brand</th>
+                <th style="padding:10px 12px;text-align:left;">Town</th>
+                <th style="padding:10px 12px;text-align:left;">Price</th>
+                <th style="padding:10px 12px;text-align:left;">Distance</th>
               </tr>
             </thead>
             <tbody>{righe}</tbody>

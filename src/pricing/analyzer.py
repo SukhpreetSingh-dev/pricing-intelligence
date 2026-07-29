@@ -74,7 +74,7 @@ class PricingAnalyzer:
                 'totale':           None,
                 'diff_vs_min':      None,
                 'diff_vs_media':    None,
-                'raccomandazione':  '⚠️ Nessun competitor trovato nel raggio',
+                'raccomandazione':  '⚠️ No competitors found within range',
                 'top_n':            df_top,
             }
 
@@ -108,7 +108,7 @@ class PricingAnalyzer:
             )
         else:
             totale = None
-            raccomandazione = '⚠️ Prezzo cliente non trovato nei dati MIMIT'
+            raccomandazione = '⚠️ Client price not found in MIMIT data'
 
         return {
             'prezzo_cliente':  prezzo_cliente,
@@ -170,20 +170,20 @@ class PricingAnalyzer:
         pct_pos = posizione / totale * 100 if totale > 0 else 50
 
         if pct_pos <= 20:
-            return '🟢 Ottimo posizionamento — sei tra i più economici della zona'
+            return '🟢 Excellent positioning — among the cheapest in the area'
         elif pct_pos <= 40:
-            return '🟡 Buon posizionamento — leggermente sotto la media'
+            return '🟡 Good positioning — slightly below average'
         elif pct_pos <= 60:
-            return f'🟠 Posizionamento medio — +{diff_vs_media:.1f} cent vs media zona'
+            return f'🟠 Average positioning — +{diff_vs_media:.1f} cents vs area average'
         elif pct_pos <= 80:
-            return f'🔴 Posizionamento alto — +{diff_vs_min:.1f} cent vs più economico'
+            return f'🔴 High positioning — +{diff_vs_min:.1f} cents vs cheapest'
         else:
-            return f'🔴 Attenzione — sei tra i più cari della zona (+{diff_vs_min:.1f} cent)'
+            return f'🔴 Warning — among the most expensive in the area (+{diff_vs_min:.1f} cents)'
 
     def _genera_summary(self, carburante: str, analisi: dict) -> str:
         """Genera una riga di summary per il carburante."""
         if analisi['prezzo_cliente'] is None:
-            return f"{carburante.upper()}: prezzo non disponibile"
+            return f"{carburante.upper()}: price not available"
 
         pos  = analisi['posizione']
         tot  = analisi['totale']
@@ -192,6 +192,6 @@ class PricingAnalyzer:
         return (
             f"{carburante.upper()}: "
             f"€{analisi['prezzo_cliente']:.3f}/L — "
-            f"posizione {pos}/{tot} — "
-            f"{'+' if diff >= 0 else ''}{diff:.1f} cent vs più economico"
+            f"position {pos}/{tot} — "
+            f"{'+' if diff >= 0 else ''}{diff:.1f} cents vs cheapest"
         )
