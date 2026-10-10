@@ -16,11 +16,14 @@ done manually or not at all.
 - **Automated daily ingestion** of the Italian MIMIT open dataset
   (locations registry + price feed)
 - **Parsing and merging** of heterogeneous sources into a single dataset
-- **Geocoding** of client addresses into coordinates
-- **Geospatial analysis**: identifies competitors within a configurable
-  radius of each location
-- **Competitive ranking**: national position and gap vs the cheapest
-  competitor, per fuel type
+- **Exact client matching**: each location is linked to its own MIMIT station
+  (`id_impianto`), with address geocoding as a fallback
+- **Geospatial analysis**: identifies all competitors within a configurable
+  radius of each location (the client's own station excluded)
+- **Competitive ranking**: position within the radius, gap vs the cheapest
+  and vs the average competitor, per fuel type
+- **Data freshness control**: competitor prices not updated in the last
+  N days are excluded and reported, since many stations report late
 - **Automated email delivery**, one report per client, multiple recipients
 - **Graceful degradation**: falls back to cached data when the source is unreachable
 
@@ -34,13 +37,13 @@ done manually or not at all.
 ## Results
 
 - Processes **23,700+ locations** and **74,900+ daily price records**
-- Ranks each location against **33,900+ competitors** nationwide
+- Ranks each location against every competitor within its radius
 - Runs end to end with no manual intervention
 - Reports delivered within minutes of data availability
 
 ## Stack
 
-Python 3.14 · pandas · NumPy · Requests · Geopy · SQLite · SMTP
+Python 3.14 · pandas · NumPy · Requests · Geopy · SMTP · pytest
 
 ## Use case
 
@@ -59,7 +62,18 @@ cp .env.example .env                      # SMTP credentials
 cp clienti.example.json clienti.json      # your locations
 
 python main.py
+python -m pytest -q                       # tests on synthetic data
 ```
+
+### Client configuration (`clienti.json`)
+
+| Field | Meaning |
+|---|---|
+| `id_impianto` | MIMIT station id of the client. Recommended: gives the exact price. If `null`, the address is geocoded and matched to a MIMIT station within 300 m — the run prints the id found, so you can paste it in. |
+| `raggio_km` | Competitor search radius |
+| `top_n` | Rows in the report table (statistics always use every competitor in the radius) |
+| `is_self` | `true` = self-service prices, `false` = full-service (LPG and CNG always use both) |
+| `max_eta_giorni` | Competitor prices older than this many days are excluded (default 3) |
 
 ## Data
 

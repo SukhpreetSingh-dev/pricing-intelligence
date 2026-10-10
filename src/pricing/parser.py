@@ -131,6 +131,15 @@ class MimitParser:
         # Converti is_self in bool
         df['is_self'] = df['is_self'].astype(int).astype(bool)
 
+        # Data dell'ultima comunicazione del prezzo (es. "09/10/2026 07:41:12").
+        # Serve a capire quanto e' vecchio un prezzo: molti gestori
+        # comunicano con giorni di ritardo.
+        df['data_comunicazione'] = pd.to_datetime(
+            df['data_comunicazione'],
+            format='%d/%m/%Y %H:%M:%S',
+            errors='coerce'
+        )
+
         print(f"  Prezzi: {len(df):,} righe caricate "
               f"({df['carburante'].nunique()} carburanti)")
         return df

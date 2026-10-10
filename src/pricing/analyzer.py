@@ -1,197 +1,175 @@
 """
-PricingAnalyzer — analizza il posizionamento del cliente vs competitor.
+PricingAnalyzer — analizza il posizionamento del cliente vs competitor nel raggio.
 """
 
-import pandas as pd
-import numpy as np
 from typing import Optional
+
+import pandas as pd
+
+from src.pricing.finder import filtro_self
+
+
+# Prezzi comunicati da piu' di questi giorni non entrano nelle statistiche
+# (sovrascrivibile per cliente con "max_eta_giorni" in clienti.json).
+MAX_ETA_GIORNI_DEFAULT = 3
+
+
+def calcola_posizionamento(prezzo_cliente: float,
+                           df_raggio: pd.DataFrame) -> dict:
+    """
+    Posizione e statistiche del cliente rispetto a TUTTI i competitor passati.
+
+    Regole:
+      - prezzo piu' basso = meglio -> posizione 1 = il piu' economico
+      - pari merito: chi ha il tuo stesso prezzo NON ti sta davanti
+      - posizione e totale includono il cliente: "3 su 19" = 18 competitor + te
+      - differenziali in centesimi, 1 decimale
+    """
+    chiavi = ['posizione', 'prezzo_min', 'prezzo_medio', 'prezzo_max',
+              'diff_vs_min', 'diff_vs_media']
+    if df_raggio.empty or df_raggio['prezzo'].dropna().empty:
+        return {**{k: None for k in chiavi}, 'totale': 0}
+
+    prezzi = df_raggio['prezzo'].dropna()
+
+    return {
+        'posizione':     int((prezzi < prezzo_cliente).sum()) + 1,
+        'totale':        len(prezzi) + 1,
+        'prezzo_min':    round(prezzi.min(), 3),
+        'prezzo_medio':  round(prezzi.mean(), 3),
+        'prezzo_max':    round(prezzi.max(), 3),
+        'diff_vs_min':   round((prezzo_cliente - prezzi.min()) * 100, 1),
+        'diff_vs_media': round((prezzo_cliente - prezzi.mean()) * 100, 1),
+    }
+
+
+def eta_giorni(date: pd.Series, riferimento: pd.Timestamp) -> pd.Series:
+    """Giorni trascorsi da ogni data al riferimento (NaN se data mancante)."""
+    return (riferimento.normalize() - date.dt.normalize()).dt.days
 
 
 class PricingAnalyzer:
     """
-    Analizza il posizionamento prezzi del cliente rispetto ai competitor.
-
     Uso:
-        analyzer = PricingAnalyzer()
-        report = analyzer.analizza(cliente, risultati_finder, df_mimit)
+        analyzer = PricingAnalyzer(df_mimit)
+        report = analyzer.analizza(cliente, competitor_per_carburante)
     """
 
-    def analizza(self,
-                 cliente: dict,
-                 top_n: dict,
-                 df_mimit: pd.DataFrame) -> dict:
+    def __init__(self, df_mimit: pd.DataFrame):
+        self.df = df_mimit
+        # Riferimento = comunicazione piu' recente nel dataset, non "adesso":
+        # cosi' l'eta' resta corretta anche se si usano dati in cache.
+        self.riferimento = df_mimit['data_comunicazione'].max()
+
+    def analizza(self, cliente: dict, competitor: dict) -> dict:
         """
-        Produce il report completo di posizionamento per un cliente.
-
         Args:
-            cliente:    dict con dati cliente (lat, lon, carburanti...)
-            top_n:      output di CompetitorFinder.top_n_per_carburante()
-            df_mimit:   DataFrame completo MIMIT
-
-        Restituisce dict con analisi per ogni carburante.
+            cliente:    dict cliente (id_impianto, carburanti, top_n, is_self...)
+            competitor: output di CompetitorFinder.competitor_per_carburante()
         """
         report = {
-            'cliente':    cliente,
-            'carburanti': {},
-            'summary':    [],
+            'cliente':     cliente,
+            'carburanti':  {},
+            'summary':     [],
+            'riferimento': self.riferimento,
         }
 
         for carburante in cliente['carburanti']:
-            df_top = top_n.get(carburante, pd.DataFrame())
-            analisi = self._analizza_carburante(
-                carburante, df_top, cliente, df_mimit
-            )
+            df_raggio = competitor.get(carburante, pd.DataFrame())
+            analisi = self._analizza_carburante(carburante, df_raggio, cliente)
             report['carburanti'][carburante] = analisi
-
-            # Summary testuale
-            if analisi['prezzo_cliente'] is not None:
-                report['summary'].append(
-                    self._genera_summary(carburante, analisi)
-                )
-
+            report['summary'].append(self._genera_summary(carburante, analisi,
+                                                          cliente))
         return report
 
-    def _analizza_carburante(self,
-                              carburante: str,
-                              df_top: pd.DataFrame,
-                              cliente: dict,
-                              df_mimit: pd.DataFrame) -> dict:
-        """Analizza un singolo carburante."""
+    def _analizza_carburante(self, carburante: str,
+                             df_raggio: pd.DataFrame, cliente: dict) -> dict:
+        max_eta = cliente.get('max_eta_giorni', MAX_ETA_GIORNI_DEFAULT)
 
-        # Trova il prezzo del cliente nel dataset MIMIT
-        prezzo_cliente = self._trova_prezzo_cliente(
-            cliente, carburante, df_mimit
-        )
+        prezzo_cliente, eta_cliente = self._prezzo_cliente(cliente, carburante)
 
-        if df_top.empty:
-            return {
-                'prezzo_cliente':   prezzo_cliente,
-                'n_competitor':     0,
-                'prezzo_min':       None,
-                'prezzo_medio':     None,
-                'prezzo_max':       None,
-                'posizione':        None,
-                'totale':           None,
-                'diff_vs_min':      None,
-                'diff_vs_media':    None,
-                'raccomandazione':  '⚠️ No competitors found within range',
-                'top_n':            df_top,
-            }
+        # Separa prezzi aggiornati da prezzi vecchi
+        n_esclusi = 0
+        if not df_raggio.empty:
+            df_raggio = df_raggio.copy()
+            df_raggio['eta_giorni'] = eta_giorni(df_raggio['data_comunicazione'],
+                                                 self.riferimento)
+            aggiornati = df_raggio['eta_giorni'] <= max_eta
+            n_esclusi = int((~aggiornati).sum())
+            df_raggio = df_raggio[aggiornati]
 
-        # Trova tutti competitor nel raggio per statistiche complete
-        df_zona = df_mimit[
-            df_mimit['carburante'] == carburante
-        ].copy()
+        top_n = df_raggio.head(cliente['top_n']).reset_index(drop=True)
+        top_n.index += 1
 
-        prezzo_min   = df_top['prezzo'].min()
-        prezzo_medio = df_top['prezzo'].mean()
-        prezzo_max   = df_top['prezzo'].max()
-        n_competitor = len(df_top)
-
-        # Calcola posizione e differenziali se abbiamo il prezzo cliente
-        posizione       = None
-        diff_vs_min     = None
-        diff_vs_media   = None
-        raccomandazione = ''
-
-        if prezzo_cliente is not None:
-            diff_vs_min   = round((prezzo_cliente - prezzo_min) * 100, 1)
-            diff_vs_media = round((prezzo_cliente - prezzo_medio) * 100, 1)
-
-            # Calcola posizione nella classifica completa zona
-            prezzi_zona = df_zona['prezzo'].dropna().sort_values().values
-            posizione   = int(np.searchsorted(prezzi_zona, prezzo_cliente)) + 1
-            totale      = len(prezzi_zona)
-
-            raccomandazione = self._raccomandazione(
-                posizione, totale, diff_vs_min, diff_vs_media
-            )
-        else:
-            totale = None
-            raccomandazione = '⚠️ Client price not found in MIMIT data'
-
-        return {
-            'prezzo_cliente':  prezzo_cliente,
-            'n_competitor':    n_competitor,
-            'prezzo_min':      round(prezzo_min, 3),
-            'prezzo_medio':    round(prezzo_medio, 3),
-            'prezzo_max':      round(prezzo_max, 3),
-            'posizione':       posizione,
-            'totale':          totale,
-            'diff_vs_min':     diff_vs_min,
-            'diff_vs_media':   diff_vs_media,
-            'raccomandazione': raccomandazione,
-            'top_n':           df_top,
+        base = {
+            'prezzo_cliente': prezzo_cliente,
+            'eta_cliente':    eta_cliente,
+            'n_competitor':   len(df_raggio),
+            'n_esclusi':      n_esclusi,
+            'max_eta_giorni': max_eta,
+            'top_n':          top_n,
         }
 
-    def _trova_prezzo_cliente(self,
-                               cliente: dict,
-                               carburante: str,
-                               df_mimit: pd.DataFrame) -> Optional[float]:
-        """
-        Cerca il prezzo del cliente nel dataset MIMIT usando
-        le sue coordinate GPS — trova l'impianto più vicino.
-        """
-        if 'lat' not in cliente or cliente['lat'] is None:
-            return None
+        if df_raggio.empty:
+            return {**base, **calcola_posizionamento(0, df_raggio),
+                    'raccomandazione': '⚠️ No up-to-date competitor prices within range'}
 
-        df_carb = df_mimit[
-            (df_mimit['carburante'] == carburante) &
-            (df_mimit['is_self'] == cliente.get('is_self', True))
-        ].copy()
+        if prezzo_cliente is None:
+            stats = calcola_posizionamento(0, df_raggio)
+            stats.update(posizione=None, totale=len(df_raggio),
+                         diff_vs_min=None, diff_vs_media=None)
+            return {**base, **stats,
+                    'raccomandazione': '⚠️ Your price was not found in MIMIT data'}
 
-        if df_carb.empty:
-            return None
+        stats = calcola_posizionamento(prezzo_cliente, df_raggio)
+        return {**base, **stats,
+                'raccomandazione': self._raccomandazione(stats['posizione'],
+                                                         stats['totale'])}
 
-        # Trova l'impianto MIMIT più vicino alle coordinate del cliente
-        lat_c = cliente['lat']
-        lon_c = cliente['lon']
+    def _prezzo_cliente(self, cliente: dict,
+                        carburante: str) -> tuple[Optional[float], Optional[int]]:
+        """Prezzo e eta' (giorni) del cliente, cercati per id_impianto esatto."""
+        id_impianto = cliente.get('id_impianto')
+        if not id_impianto:
+            return None, None
 
-        df_carb['dist_tmp'] = np.sqrt(
-            (df_carb['lat'] - lat_c) ** 2 +
-            (df_carb['lon'] - lon_c) ** 2
-        )
+        df = self.df[(self.df['id_impianto'] == str(id_impianto)) &
+                     (self.df['carburante'] == carburante)]
+        is_self = filtro_self(carburante, cliente.get('is_self', True))
+        if is_self is not None:
+            df = df[df['is_self'] == is_self]
+        if df.empty:
+            return None, None
 
-        idx_min = df_carb['dist_tmp'].idxmin()
-        dist_min = df_carb.loc[idx_min, 'dist_tmp']
+        # Se ci sono piu' righe (es. GPL self e servito) prendi la piu' recente
+        riga = df.sort_values('data_comunicazione').iloc[-1]
+        eta = eta_giorni(pd.Series([riga['data_comunicazione']]),
+                         self.riferimento).iloc[0]
+        return float(riga['prezzo']), (None if pd.isna(eta) else int(eta))
 
-        # Accetta solo se la distanza è ragionevole (< 0.05 gradi ~ 5km)
-        if dist_min > 0.05:
-            return None
+    def _raccomandazione(self, posizione: int, totale: int) -> str:
+        """Valutazione in base al percentile nel raggio (1 = piu' economico)."""
+        pct = posizione / totale * 100
+        if pct <= 20:
+            return '🟢 Excellent — among the cheapest within range'
+        if pct <= 40:
+            return '🟡 Good — cheaper than most competitors within range'
+        if pct <= 60:
+            return '🟠 Average — in the middle of competitors within range'
+        if pct <= 80:
+            return '🔴 High — more expensive than most competitors within range'
+        return '🔴 Warning — among the most expensive within range'
 
-        return float(df_carb.loc[idx_min, 'prezzo'])
-
-    def _raccomandazione(self,
-                          posizione: int,
-                          totale: int,
-                          diff_vs_min: float,
-                          diff_vs_media: float) -> str:
-        """Genera una raccomandazione testuale basata sul posizionamento."""
-        pct_pos = posizione / totale * 100 if totale > 0 else 50
-
-        if pct_pos <= 20:
-            return '🟢 Excellent positioning — among the cheapest in the area'
-        elif pct_pos <= 40:
-            return '🟡 Good positioning — slightly below average'
-        elif pct_pos <= 60:
-            return f'🟠 Average positioning — +{diff_vs_media:.1f} cents vs area average'
-        elif pct_pos <= 80:
-            return f'🔴 High positioning — +{diff_vs_min:.1f} cents vs cheapest'
-        else:
-            return f'🔴 Warning — among the most expensive in the area (+{diff_vs_min:.1f} cents)'
-
-    def _genera_summary(self, carburante: str, analisi: dict) -> str:
-        """Genera una riga di summary per il carburante."""
+    def _genera_summary(self, carburante: str, analisi: dict,
+                        cliente: dict) -> str:
+        nome = carburante.upper()
         if analisi['prezzo_cliente'] is None:
-            return f"{carburante.upper()}: price not available"
-
-        pos  = analisi['posizione']
-        tot  = analisi['totale']
-        diff = analisi['diff_vs_min']
-
-        return (
-            f"{carburante.upper()}: "
-            f"€{analisi['prezzo_cliente']:.3f}/L — "
-            f"position {pos}/{tot} — "
-            f"{'+' if diff >= 0 else ''}{diff:.1f} cents vs cheapest"
-        )
+            return f"{nome}: your price not available"
+        if analisi['posizione'] is None:
+            return (f"{nome}: €{analisi['prezzo_cliente']:.3f}/L — "
+                    f"no up-to-date competitors within {cliente['raggio_km']} km")
+        return (f"{nome}: €{analisi['prezzo_cliente']:.3f}/L — "
+                f"position {analisi['posizione']}/{analisi['totale']} "
+                f"within {cliente['raggio_km']} km — "
+                f"{analisi['diff_vs_min']:+.1f} cents vs cheapest, "
+                f"{analisi['diff_vs_media']:+.1f} vs average")
