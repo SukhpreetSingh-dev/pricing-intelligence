@@ -41,12 +41,14 @@ def localizza_clienti(clienti: list, df_mimit: pd.DataFrame,
                 c['lat'] = float(impianti.loc[id_impianto, 'lat'])
                 c['lon'] = float(impianti.loc[id_impianto, 'lon'])
                 c['id_impianto'] = id_impianto
+                c['impianto'] = _info_impianto(impianti.loc[id_impianto])
                 c['localizzato'] = True
                 print(f"  ✅ {c['nome']} → impianto MIMIT {id_impianto}")
             else:
                 print(f"  ⚠️  {c['nome']} — id_impianto {id_impianto} "
                       f"non presente nei dati MIMIT")
-                c.update(lat=None, lon=None, id_impianto=None, localizzato=False)
+                c.update(lat=None, lon=None, id_impianto=None, impianto=None,
+                         localizzato=False)
         else:
             c.update(_localizza_da_indirizzo(c, finder, geocoder))
 
@@ -61,11 +63,13 @@ def _localizza_da_indirizzo(cliente: dict, finder: CompetitorFinder,
                             geocoder) -> dict:
     if geocoder is None:
         print(f"  ⚠️  {cliente['nome']} — senza id_impianto e senza geocoder")
-        return dict(lat=None, lon=None, id_impianto=None, localizzato=False)
+        return dict(lat=None, lon=None, id_impianto=None, impianto=None,
+                    localizzato=False)
 
     coords = geocoder.geocodifica(cliente['indirizzo'])
     if coords is None:
-        return dict(lat=None, lon=None, id_impianto=None, localizzato=False)
+        return dict(lat=None, lon=None, id_impianto=None, impianto=None,
+                    localizzato=False)
 
     lat, lon = coords
     id_trovato: Optional[str] = finder.impianto_piu_vicino(lat, lon, MAX_MATCH_KM)
@@ -76,4 +80,15 @@ def _localizza_da_indirizzo(cliente: dict, finder: CompetitorFinder,
     else:
         print(f"     ⚠️ nessun impianto MIMIT entro {MAX_MATCH_KM*1000:.0f} m "
               f"dall'indirizzo: il prezzo cliente non sara' disponibile")
-    return dict(lat=lat, lon=lon, id_impianto=id_trovato, localizzato=True)
+    info = None
+    if id_trovato:
+        riga = finder.df[finder.df['id_impianto'] == id_trovato].iloc[0]
+        info = _info_impianto(riga)
+    return dict(lat=lat, lon=lon, id_impianto=id_trovato, impianto=info,
+                localizzato=True)
+
+
+def _info_impianto(riga) -> dict:
+    """Dati anagrafici MIMIT dell'impianto del cliente, per il report."""
+    return {k: riga.get(k) for k in
+            ('bandiera', 'gestore', 'nome', 'indirizzo', 'comune', 'provincia')}

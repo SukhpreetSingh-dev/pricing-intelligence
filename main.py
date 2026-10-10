@@ -72,15 +72,14 @@ def main():
     analyzer = PricingAnalyzer(df_mimit)
     notifier = PricingNotifier()
 
-    ok = 0
-    ko = 0
+    esiti = {'inviata': 0, 'saltata': 0, 'errore': 0, 'non localizzato': 0}
 
     for cliente in clienti_geo:
         nome = cliente['nome']
 
         if not cliente.get('localizzato'):
             print(f"  ⚠️  {nome} — impossibile localizzare, skip")
-            ko += 1
+            esiti['non localizzato'] += 1
             continue
 
         print(f"\n  → {nome}")
@@ -110,15 +109,14 @@ def main():
             print(f"     {riga}")
 
         # Invia email
-        inviata = notifier.invia_report(report)
-        if inviata:
-            ok += 1
-        else:
-            ko += 1
+        esiti[notifier.invia_report(report)] += 1
 
     # ── Fine ───────────────────────────────────────────────
     print("\n" + "=" * 55)
-    print(f"  COMPLETATO — {ok} email inviate, {ko} errori")
+    print(f"  COMPLETATO — {esiti['inviata']} inviate, "
+          f"{esiti['saltata']} saltate (email non configurata), "
+          f"{esiti['errore']} errori invio, "
+          f"{esiti['non localizzato']} clienti non localizzati")
     print("=" * 55)
 
 

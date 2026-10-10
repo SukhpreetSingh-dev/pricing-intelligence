@@ -43,6 +43,32 @@ def calcola_posizionamento(prezzo_cliente: float,
     }
 
 
+def aggiungi_rank(df: pd.DataFrame, prezzo_cliente: Optional[float]) -> pd.DataFrame:
+    """
+    Aggiunge a ogni competitor (gia' ordinati per prezzo):
+      - 'rank': posizione nella classifica che INCLUDE il cliente,
+                con pari merito (stesso prezzo = stesso numero)
+      - 'diff_vs_cliente': centesimi rispetto al cliente
+                           (negativo = il competitor costa meno di te)
+    """
+    df = df.copy()
+    if df.empty or 'prezzo' not in df.columns:
+        df['rank'] = pd.Series(dtype=int)
+        df['diff_vs_cliente'] = pd.Series(dtype=float)
+        return df
+    prezzi = df['prezzo'].values
+    # quanti competitor costano strettamente meno di ogni riga
+    piu_economici = [int((prezzi < p).sum()) for p in prezzi]
+    if prezzo_cliente is None:
+        df['rank'] = [n + 1 for n in piu_economici]
+        df['diff_vs_cliente'] = None
+    else:
+        df['rank'] = [n + 1 + (1 if prezzo_cliente < p else 0)
+                      for n, p in zip(piu_economici, prezzi)]
+        df['diff_vs_cliente'] = ((df['prezzo'] - prezzo_cliente) * 100).round(1)
+    return df
+
+
 def eta_giorni(date: pd.Series, riferimento: pd.Timestamp) -> pd.Series:
     """Giorni trascorsi da ogni data al riferimento (NaN se data mancante)."""
     return (riferimento.normalize() - date.dt.normalize()).dt.days
@@ -98,6 +124,7 @@ class PricingAnalyzer:
             n_esclusi = int((~aggiornati).sum())
             df_raggio = df_raggio[aggiornati]
 
+        df_raggio = aggiungi_rank(df_raggio, prezzo_cliente)
         top_n = df_raggio.head(cliente['top_n']).reset_index(drop=True)
         top_n.index += 1
 
