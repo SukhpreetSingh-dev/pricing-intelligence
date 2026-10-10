@@ -7,9 +7,9 @@ Uso:
 Cosa fa:
     1. Scarica i dati MIMIT aggiornati
     2. Parsa anagrafica e prezzi
-    3. Geocodifica i clienti
-    4. Per ogni cliente trova i Top N competitor per carburante
-    5. Analizza il posizionamento
+    3. Collega ogni cliente al suo impianto MIMIT (id_impianto o indirizzo)
+    4. Per ogni cliente trova TUTTI i competitor nel raggio, per carburante
+    5. Analizza il posizionamento (statistiche sul raggio, tabella sul Top N)
     6. Manda l'email di report
 """
 
@@ -22,6 +22,7 @@ from src.pricing.downloader import MimitDownloader
 from src.pricing.parser import MimitParser
 from src.pricing.geocoder import Geocoder
 from src.pricing.finder import CompetitorFinder
+from src.pricing.clienti import localizza_clienti
 from src.pricing.analyzer import PricingAnalyzer
 from src.pricing.notifier import PricingNotifier
 
@@ -58,16 +59,17 @@ def main():
     parser  = MimitParser(paths['anagrafica'], paths['prezzi'])
     df_mimit = parser.parse()
 
-    # ── 3. Carica e geocodifica clienti ────────────────────
-    print("\nSTEP 3 — Geocoding clienti")
-    clienti     = carica_clienti()
-    geo         = Geocoder()
-    clienti_geo = geo.geocodifica_clienti(clienti)
+    # ── 3. Collega i clienti ai loro impianti MIMIT ────────
+    print("\nSTEP 3 — Localizzazione clienti")
+    clienti = carica_clienti()
+    finder  = CompetitorFinder(df_mimit)
+    # Il geocoder serve solo per i clienti senza id_impianto
+    geo = Geocoder() if any(not c.get('id_impianto') for c in clienti) else None
+    clienti_geo = localizza_clienti(clienti, df_mimit, finder, geo)
 
     # ── 4-5-6. Loop clienti ────────────────────────────────
     print(f"\nSTEP 4 — Elaborazione e invio report")
-    finder   = CompetitorFinder(df_mimit)
-    analyzer = PricingAnalyzer()
+    analyzer = PricingAnalyzer(df_mimit)
     notifier = PricingNotifier()
 
     ok = 0
@@ -76,27 +78,27 @@ def main():
     for cliente in clienti_geo:
         nome = cliente['nome']
 
-        if not cliente.get('geocodificato'):
-            print(f"  ⚠️  {nome} — geocoding fallito, skip")
+        if not cliente.get('localizzato'):
+            print(f"  ⚠️  {nome} — impossibile localizzare, skip")
             ko += 1
             continue
 
         print(f"\n  → {nome}")
 
-        # Top N competitor per carburante
-        top_n = finder.top_n_per_carburante(
+        # TUTTI i competitor nel raggio, cliente escluso
+        competitor = finder.competitor_per_carburante(
             lat_cliente = cliente['lat'],
-            lon_cliente  = cliente['lon'],
-            raggio_km    = cliente['raggio_km'],
-            carburanti   = cliente['carburanti'],
-            top_n        = cliente['top_n'],
-            is_self      = cliente['is_self']
+            lon_cliente = cliente['lon'],
+            raggio_km   = cliente['raggio_km'],
+            carburanti  = cliente['carburanti'],
+            is_self     = cliente['is_self'],
+            escludi_id  = cliente.get('id_impianto'),
         )
 
         # Analisi posizionamento
-        report = analyzer.analizza(cliente, top_n, df_mimit)
+        report = analyzer.analizza(cliente, competitor)
 
-        # Debug: salva anteprima HTML per screenshot
+        # Anteprima HTML del report (cartella output/, ignorata da git)
         os.makedirs("output", exist_ok=True)
         preview_path = f"output/preview_{cliente['id']}.html"
         with open(preview_path, "w", encoding="utf-8") as f:

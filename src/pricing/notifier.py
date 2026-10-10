@@ -8,6 +8,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 from dotenv import load_dotenv
+import pandas as pd
 
 load_dotenv()
 
@@ -74,8 +75,7 @@ class PricingNotifier:
         # Sezioni per ogni carburante
         sezioni = ''
         for carburante, analisi in carburanti.items():
-            sezioni += self._sezione_carburante(carburante, analisi,
-                                                 cliente['top_n'])
+            sezioni += self._sezione_carburante(carburante, analisi, cliente)
 
         # Summary
         summary_html = ''
@@ -118,15 +118,32 @@ class PricingNotifier:
             <hr style="border:none;border-top:1px solid #E5E7EB;
                 margin:24px 0 16px;">
             <p style="color:#9CA3AF;font-size:12px;margin:0;">
-              ⚠️ Data updated at 8:00 AM the previous day — Source: MIMIT Open Data<br>
-              Self-service prices. Automatically generated.
+              Source: MIMIT Open Data — latest price update in dataset:
+              {self._formatta_data(report.get('riferimento'))}<br>
+              {'Self-service' if cliente.get('is_self', True) else 'Full-service'}
+              prices (LPG and CNG: all). Competitor prices older than
+              {cliente.get('max_eta_giorni', 3)} days are excluded.
+              Automatically generated.
             </p>
           </div>
         </div>"""
 
 
+    @staticmethod
+    def _formatta_data(data) -> str:
+        if data is None or pd.isna(data):
+            return 'n/a'
+        return data.strftime('%d/%m/%Y %H:%M')
+
+    @staticmethod
+    def _formatta_eta(eta) -> str:
+        if eta is None or pd.isna(eta):
+            return 'n/a'
+        eta = int(eta)
+        return 'today' if eta == 0 else ('1 day ago' if eta == 1 else f'{eta} days ago')
+
     def _sezione_carburante(self, carburante: str,
-                             analisi: dict, top_n: int) -> str:
+                             analisi: dict, cliente: dict) -> str:
         """Genera la sezione HTML per un carburante."""
 
         COLORI = {
@@ -138,7 +155,19 @@ class PricingNotifier:
         colore = COLORI.get(carburante, '#1A56DB')
 
         # Info prezzo cliente
-        if analisi['prezzo_cliente']:
+        top_n = cliente['top_n']
+        eta_c = analisi.get('eta_cliente')
+        avviso_eta = ''
+        if eta_c is not None and eta_c > analisi['max_eta_giorni']:
+            avviso_eta = (f'<br>⏳ Your price was last updated '
+                          f'{self._formatta_eta(eta_c)}: check it is still correct.')
+        avviso_esclusi = ''
+        if analisi.get('n_esclusi'):
+            avviso_esclusi = (f"<p style=\"margin:0 0 8px;font-size:12px;color:#9CA3AF;\">"
+                              f"{analisi['n_esclusi']} competitor price(s) not updated in the "
+                              f"last {analisi['max_eta_giorni']} days were excluded.</p>")
+
+        if analisi['prezzo_cliente'] is not None and analisi['posizione'] is not None:
             prezzo_info = f"""
             <div style="background:#F0F9FF;border-left:4px solid {colore};
                 padding:12px 16px;border-radius:4px;margin-bottom:12px;">
@@ -146,10 +175,15 @@ class PricingNotifier:
                 <strong>Your price:</strong>
                 €{analisi['prezzo_cliente']:.3f}/L &nbsp;|&nbsp;
                 Position <strong>{analisi['posizione']}</strong>
-                of {analisi['totale']} stations in the area
+                of {analisi['totale']} within {cliente['raggio_km']} km
+                (you + {analisi['n_competitor']} competitors)
               </p>
               <p style="margin:4px 0 0;font-size:13px;color:#6B7280;">
-                {analisi['raccomandazione']}
+                {analisi['raccomandazione']}<br>
+                {analisi['diff_vs_min']:+.1f} cents vs cheapest
+                (€{analisi['prezzo_min']:.3f}) ·
+                {analisi['diff_vs_media']:+.1f} cents vs average
+                (€{analisi['prezzo_medio']:.3f}){avviso_eta}
               </p>
             </div>"""
         else:
@@ -157,7 +191,7 @@ class PricingNotifier:
             <div style="background:#FEF3C7;border-left:4px solid #C27803;
                 padding:12px 16px;border-radius:4px;margin-bottom:12px;">
               <p style="margin:0;font-size:13px;color:#92400E;">
-                {analisi['raccomandazione']}
+                {analisi['raccomandazione']}{avviso_eta}
               </p>
             </div>"""
 
@@ -179,10 +213,12 @@ class PricingNotifier:
                       font-size:14px;">€{row['prezzo']:.3f}</td>
                   <td style="padding:10px 12px;font-size:12px;
                       color:#9CA3AF;">{row['distanza_km']:.1f} km</td>
+                  <td style="padding:10px 12px;font-size:12px;
+                      color:#9CA3AF;">{self._formatta_eta(row.get('eta_giorni'))}</td>
                 </tr>"""
         else:
             righe = """
-            <tr><td colspan="5" style="padding:12px;color:#9CA3AF;
+            <tr><td colspan="6" style="padding:12px;color:#9CA3AF;
                 font-size:13px;">No data available</td></tr>"""
 
         return f"""
@@ -192,6 +228,7 @@ class PricingNotifier:
             {carburante} — Top {top_n} cheapest</h2>
 
           {prezzo_info}
+          {avviso_esclusi}
 
           <table style="width:100%;border-collapse:collapse;
               font-size:13px;border-radius:8px;overflow:hidden;">
@@ -202,6 +239,7 @@ class PricingNotifier:
                 <th style="padding:10px 12px;text-align:left;">Town</th>
                 <th style="padding:10px 12px;text-align:left;">Price</th>
                 <th style="padding:10px 12px;text-align:left;">Distance</th>
+                <th style="padding:10px 12px;text-align:left;">Updated</th>
               </tr>
             </thead>
             <tbody>{righe}</tbody>
