@@ -10,7 +10,7 @@ import pytest
 from src.pricing.analyzer import PricingAnalyzer, calcola_posizionamento
 from src.pricing.clienti import localizza_clienti
 from src.pricing.finder import CompetitorFinder
-from src.pricing.notifier import PricingNotifier
+from src.pricing.notifier import PricingNotifier, nome_distributore, pulisci_indirizzo
 
 OGGI = pd.Timestamp('2026-10-09 07:30:00')
 
@@ -32,19 +32,22 @@ def _df_mimit() -> pd.DataFrame:
     righe = []
     for id_, lat, lon, band, prezzo, eta in IMPIANTI:
         data = OGGI - pd.Timedelta(days=eta)
-        righe.append(dict(id_impianto=id_, lat=lat, lon=lon, bandiera=band,
-                          comune='MODENA', carburante='benzina', is_self=True,
+        ana = dict(id_impianto=id_, lat=lat, lon=lon, bandiera=band,
+                   gestore=f'GESTORE {id_} S.R.L.', nome=id_,
+                   indirizzo=f'VIA  EMILIA {id_[-1]} 41121', comune='MODENA')
+        righe.append(dict(**ana, carburante='benzina', is_self=True,
                           prezzo=prezzo, data_comunicazione=data))
         # stesso impianto, servito: piu' caro, non deve entrare nei conti self
-        righe.append(dict(id_impianto=id_, lat=lat, lon=lon, bandiera=band,
-                          comune='MODENA', carburante='benzina', is_self=False,
+        righe.append(dict(**ana, carburante='benzina', is_self=False,
                           prezzo=prezzo + 0.2, data_comunicazione=data))
     # GPL: solo servito
     righe.append(dict(id_impianto=CLIENTE_ID, lat=44.6471, lon=10.9252,
-                      bandiera='Q8', comune='MODENA', carburante='gpl',
+                      bandiera='Q8', gestore='GESTORE 1000 S.R.L.', nome='1000',
+                      indirizzo='VIA  EMILIA 0 41121', comune='MODENA', carburante='gpl',
                       is_self=False, prezzo=0.699, data_comunicazione=OGGI))
     righe.append(dict(id_impianto='1001', lat=44.6560, lon=10.9252,
-                      bandiera='Esso', comune='MODENA', carburante='gpl',
+                      bandiera='Esso', gestore='GESTORE 1001 S.R.L.', nome='1001',
+                      indirizzo='VIA  EMILIA 1 41121', comune='MODENA', carburante='gpl',
                       is_self=False, prezzo=0.679, data_comunicazione=OGGI))
     return pd.DataFrame(righe)
 
@@ -144,9 +147,39 @@ def test_prezzi_vecchi_esclusi():
     assert tutti['n_esclusi'] == 0 and tutti['prezzo_min'] == pytest.approx(1.699)
 
 
-# ── il report HTML si genera senza errori ──
+# ── classifica: rank con pari merito e differenza vs cliente ──
+
+def test_rank_e_diff_vs_cliente():
+    top = _report()['carburanti']['benzina']['top_n']
+    # Esso 1.799 -> 1° ; Api-Ip 1.849 = cliente -> pari merito 2° ; Agip 1.899 -> 4°
+    assert list(top['rank']) == [1, 2, 4]
+    assert list(top['diff_vs_cliente']) == [-5.0, 0.0, 5.0]
+
+
+# ── pulizia campi MIMIT ──
+
+def test_pulizia_campi_mimit():
+    assert pulisci_indirizzo('VIA ROMA  NORD 33 46025', 'POGGIO RUSCO') == \
+        'Via Roma Nord 33, Poggio Rusco'
+    assert pulisci_indirizzo('NAZIONALE 69 46036', None) == 'Nazionale 69'
+    assert nome_distributore({'bandiera': 'Esso', 'gestore': 'EGI-2GO S.R.L.'}) == \
+        'Esso · Egi-2Go S.R.L.'
+    assert nome_distributore({'bandiera': None, 'gestore': None}) == 'Station n/a'
+
+
+# ── il report HTML ──
 
 def test_template_html():
     html = PricingNotifier()._template_html(_report())
-    assert 'within 10 km' in html and 'Updated' in html
-    assert 'excluded' in html
+    assert 'within 10 km' in html
+    assert 'YOU — Test' in html                       # riga cliente in classifica
+    assert 'Via Emilia 1, Modena' in html             # indirizzo competitor pulito
+    assert 'Gestore 1001 S.R.L.' in html              # chi e' il competitor
+    assert 'left out' in html                         # prezzi vecchi segnalati
+
+
+def test_cliente_fuori_dal_top_n_compare_in_fondo():
+    html = PricingNotifier()._template_html(_report(top_n=1))
+    b = html.split('Petrol')[1].split('LPG')[0]
+    assert b.index('Gestore 1001') < b.index('YOU — Test')
+    assert 'YOU — Test' in b

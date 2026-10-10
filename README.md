@@ -32,7 +32,7 @@ done manually or not at all.
 
 ![Report example](docs/report-example.png)
 
-*Generated with demo locations from the public MIMIT dataset.*
+*Demo data with fictional stations — the real report reads the daily MIMIT dataset.*
 
 ## Results
 
