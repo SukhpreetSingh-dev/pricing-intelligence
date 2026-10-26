@@ -11,7 +11,10 @@ from src.pricing.finder import filtro_self
 
 # Prezzi comunicati da piu' di questi giorni non entrano nelle statistiche
 # (sovrascrivibile per cliente con "max_eta_giorni" in clienti.json).
-MAX_ETA_GIORNI_DEFAULT = 3
+# 7 e non meno: sui dati reali (ottobre 2026) il 18% dei prezzi italiani ha
+# 4-7 giorni ed e' ancora valido (impianti che non cambiano prezzo spesso);
+# oltre i 7 giorni resta solo il 2%.
+MAX_ETA_GIORNI_DEFAULT = 7
 
 
 def calcola_posizionamento(prezzo_cliente: float,

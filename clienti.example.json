@@ -15,7 +15,7 @@
     ],
     "top_n": 5,
     "is_self": true,
-    "max_eta_giorni": 3
+    "max_eta_giorni": 7
   },
   {
     "id": "cliente_002",
@@ -34,6 +34,6 @@
     ],
     "top_n": 10,
     "is_self": true,
-    "max_eta_giorni": 3
+    "max_eta_giorni": 7
   }
 ]

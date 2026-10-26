@@ -16,6 +16,8 @@ from html import escape
 import pandas as pd
 from dotenv import load_dotenv
 
+from src.pricing.analyzer import MAX_ETA_GIORNI_DEFAULT
+
 load_dotenv()
 
 
@@ -49,15 +51,30 @@ def _maiuscole_leggibili(testo: str) -> str:
 
 
 def pulisci_indirizzo(indirizzo, comune=None) -> str:
-    """Indirizzo leggibile: senza CAP finale, con il comune."""
+    """
+    Indirizzo leggibile, con il comune una volta sola.
+
+    I gestori scrivono l'indirizzo come capita: CAP ripetuti, comune e
+    provincia dentro l'indirizzo, 'VIA VIA ...'. Esempio reale MIMIT:
+    'VIA S.S.   12 KM.236+614 46036, BORGO MANTOVANO (MN) 44  46036'
+    -> 'Via S.S. 12 Km.236+614, Borgo Mantovano'
+    """
     parti = []
     if not _vuoto(indirizzo):
         ind = re.sub(r'\s+', ' ', str(indirizzo)).strip()
-        ind = re.sub(r'[\s,]*\d{5}\s*$', '', ind)          # CAP in coda
-        parti.append(_maiuscole_leggibili(ind))
+        if not _vuoto(comune):                            # taglia da ', COMUNE' in poi
+            ind = re.split(r',\s*' + re.escape(str(comune).strip()) + r'\b', ind,
+                           maxsplit=1, flags=re.IGNORECASE)[0]
+        ind = re.sub(r'\b\d{5}\b', '', ind)                 # CAP
+        ind = re.sub(r'\([A-Za-z]{2}\)', '', ind)            # provincia (MN)
+        ind = re.sub(r'^(via)\s+\1\b', r'\1', ind, flags=re.IGNORECASE)   # VIA VIA
+        ind = re.sub(r'\s+', ' ', ind).strip(' ,')
+        if ind:
+            parti.append(_maiuscole_leggibili(ind))
     if not _vuoto(comune):
         com = _maiuscole_leggibili(comune)
-        if not parti or com.lower() not in parti[0].lower():
+        # aggiungi il comune, a meno che l'indirizzo non finisca gia' con quello
+        if not parti or not parti[0].lower().endswith(com.lower()):
             parti.append(com)
     return ', '.join(parti) if parti else 'Address n/a'
 
@@ -176,7 +193,7 @@ class PricingNotifier:
 
   <tr><td style="padding:24px 24px 16px;border-bottom:1px solid #E5E7EB;">
     <div style="font-size:12px;color:{GRIGIO};text-transform:uppercase;
-      letter-spacing:.06em;">Fuel price report · {datetime.now().strftime('%d/%m/%Y')}</div>
+      letter-spacing:.06em;">Fuel price report · prices as of {formatta_data(report.get('riferimento'))}</div>
     <div style="font-size:22px;font-weight:700;margin:6px 0 4px;">
       {escape(cliente['nome'])}</div>
     <div style="font-size:13px;color:{GRIGIO};line-height:1.5;">{sottotitolo}</div>
@@ -189,10 +206,11 @@ class PricingNotifier:
 
   <tr><td style="padding:16px 24px 24px;font-size:11px;color:#9CA3AF;
     line-height:1.6;border-top:1px solid #E5E7EB;">
-    Source: MIMIT open data (prices reported by stations; latest report in
-    today's dataset: {formatta_data(report.get('riferimento'))}).
+    Source: MIMIT open data, prices as reported by each station
+    (latest update in the dataset: {formatta_data(report.get('riferimento'))}).
+    Report generated on {datetime.now().strftime('%d/%m/%Y %H:%M')}.
     LPG and CNG include full-service prices. Competitor prices not updated in
-    the last {cliente.get('max_eta_giorni', 3)} days are left out.
+    the last {cliente.get('max_eta_giorni', MAX_ETA_GIORNI_DEFAULT)} days are left out.
     “vs you” = competitor price minus your price, in euro cents:
     <span style="color:{ROSSO};">red</span> = cheaper than you.
   </td></tr>
