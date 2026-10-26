@@ -164,25 +164,25 @@ def test_pulizia_campi_mimit():
     assert pulisci_indirizzo('NAZIONALE 69 46036', None) == 'Nazionale 69'
     assert nome_distributore({'bandiera': 'Esso', 'gestore': 'EGI-2GO S.R.L.'}) == \
         'Esso · Egi-2Go S.R.L.'
-    assert nome_distributore({'bandiera': None, 'gestore': None}) == 'Station n/a'
+    assert nome_distributore({'bandiera': None, 'gestore': None}) == 'Impianto non identificato'
 
 
 # ── il report HTML ──
 
 def test_template_html():
     html = PricingNotifier()._template_html(_report())
-    assert 'within 10 km' in html
-    assert 'YOU — Test' in html                       # riga cliente in classifica
+    assert 'entro 10 km' in html
+    assert 'TU — Test' in html                       # riga cliente in classifica
     assert 'Via Emilia 1, Modena' in html             # indirizzo competitor pulito
     assert 'Gestore 1001 S.R.L.' in html              # chi e' il competitor
-    assert 'left out' in html                         # prezzi vecchi segnalati
+    assert 'esclus' in html                         # prezzi vecchi segnalati
 
 
 def test_cliente_fuori_dal_top_n_compare_in_fondo():
     html = PricingNotifier()._template_html(_report(top_n=1))
-    b = html.split('Petrol')[1].split('LPG')[0]
-    assert b.index('Gestore 1001') < b.index('YOU — Test')
-    assert 'YOU — Test' in b
+    b = html.split('>\n      Benzina</div>')[1].split('>\n      GPL</div>')[0]
+    assert b.index('Gestore 1001') < b.index('TU — Test')
+    assert 'TU — Test' in b
 
 
 # ── robustezza sui dati MIMIT reali ──
@@ -243,3 +243,33 @@ def test_limite_eta_default_7_giorni():
     assert MAX_ETA_GIORNI_DEFAULT == 7
     assert b['n_esclusi'] == 0                    # 1005 ha 6 giorni: ora resta dentro
     assert b['prezzo_min'] == pytest.approx(1.699)
+
+
+# ── formato italiano e data dei prezzi ──
+
+def test_formato_italiano():
+    from src.pricing.notifier import euro, _cent, formatta_giorno
+    from datetime import date
+    assert euro(1.994) == '€ 1,994'
+    assert _cent(-3.5) == '−3,5'
+    assert formatta_giorno(date(2026, 10, 25)) == 'domenica 25/10/2026'
+
+
+def test_report_mostra_giorno_dei_prezzi_e_metano_al_kg():
+    from datetime import date
+    r = _report()
+    r['estrazione'] = date(2026, 10, 25)
+    html = PricingNotifier()._template_html(r)
+    assert 'prezzi in vigore alle 8:00 di domenica 25/10/2026' in html
+    assert '/L</span>' in html
+
+
+def test_data_estrazione_dal_file(tmp_path):
+    from datetime import date
+    from src.pricing.downloader import data_estrazione
+    f = tmp_path / 'prezzi.csv'
+    f.write_text('Estrazione del 2026-10-25\nidImpianto|descCarburante\n')
+    assert data_estrazione(str(f)) == date(2026, 10, 25)
+    g = tmp_path / 'vuoto.csv'
+    g.write_text('idImpianto|descCarburante\n')
+    assert data_estrazione(str(g)) is None

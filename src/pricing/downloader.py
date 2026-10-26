@@ -4,12 +4,27 @@ MimitDownloader — scarica i dati ufficiali MIMIT ogni giorno.
 
 import os
 import glob
+import re
 import requests
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from requests.exceptions import RequestException
 
 URL_ANAGRAFICA = "https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv"
 URL_PREZZI = "https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv"
+
+
+def data_estrazione(path: str):
+    """
+    Data dei prezzi contenuti nel file, letta dalla prima riga
+    ('Estrazione del 2026-10-25'). MIMIT pubblica ogni giorno i prezzi
+    in vigore alle 8:00 del giorno PRIMA. None se la riga non c'e'.
+    """
+    try:
+        with open(path, encoding='utf-8', errors='replace') as f:
+            m = re.search(r'(\d{4}-\d{2}-\d{2})', f.readline())
+        return datetime.strptime(m.group(1), '%Y-%m-%d').date() if m else None
+    except OSError:
+        return None
 
 
 class DownloadError(Exception):
@@ -52,8 +67,12 @@ class MimitDownloader:
         sul file più recente già presente in cache.
         """
         if os.path.exists(path):
-            print(f"  {nome} già scaricato oggi — skip")
-            return path
+            if self._cache_aggiornata(path):
+                print(f"  {nome} già scaricato oggi — skip")
+                return path
+            # Scaricato stamattina prima che MIMIT pubblicasse i dati nuovi:
+            # lo riscarichiamo, altrimenti resteremmo indietro tutto il giorno.
+            print(f"  {nome}: la copia di oggi ha ancora i dati vecchi — riscarico")
 
         print(f"  Scaricamento {nome}...")
         try:
@@ -75,6 +94,12 @@ class MimitDownloader:
         size_kb = len(risposta.content) / 1024
         print(f"  ✅ {nome} salvato ({size_kb:.0f} KB) → {path}")
         return path
+
+    @staticmethod
+    def _cache_aggiornata(path: str) -> bool:
+        """True se il file contiene i prezzi di ieri, cioe' gli ultimi pubblicabili."""
+        estrazione = data_estrazione(path)
+        return estrazione is not None and estrazione >= date.today() - timedelta(days=1)
 
     def _cache_piu_recente(self, prefisso: str) -> str | None:
         """Restituisce il file più recente in cache per il prefisso dato."""

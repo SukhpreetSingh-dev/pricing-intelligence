@@ -157,14 +157,14 @@ class PricingAnalyzer:
 
         if df_raggio.empty:
             return {**base, **calcola_posizionamento(0, df_raggio),
-                    'raccomandazione': '⚠️ No up-to-date competitor prices within range'}
+                    'raccomandazione': '⚠️ Nessun prezzo aggiornato dei concorrenti nel raggio'}
 
         if prezzo_cliente is None:
             stats = calcola_posizionamento(0, df_raggio)
             stats.update(posizione=None, totale=len(df_raggio),
                          diff_vs_min=None, diff_vs_media=None)
             return {**base, **stats,
-                    'raccomandazione': '⚠️ Your price was not found in MIMIT data'}
+                    'raccomandazione': '⚠️ Il tuo prezzo non è presente nei dati MIMIT'}
 
         stats = calcola_posizionamento(prezzo_cliente, df_raggio)
         return {**base, **stats,
@@ -196,25 +196,26 @@ class PricingAnalyzer:
         """Valutazione in base al percentile nel raggio (1 = piu' economico)."""
         pct = posizione / totale * 100
         if pct <= 20:
-            return '🟢 Excellent — among the cheapest within range'
+            return '🟢 Ottimo — tra i più economici della zona'
         if pct <= 40:
-            return '🟡 Good — cheaper than most competitors within range'
+            return '🟡 Buono — più economico della maggior parte dei concorrenti'
         if pct <= 60:
-            return '🟠 Average — in the middle of competitors within range'
+            return '🟠 Nella media — a metà tra i concorrenti della zona'
         if pct <= 80:
-            return '🔴 High — more expensive than most competitors within range'
-        return '🔴 Warning — among the most expensive within range'
+            return '🔴 Alto — più caro della maggior parte dei concorrenti'
+        return '🔴 Attenzione — tra i più cari della zona'
 
     def _genera_summary(self, carburante: str, analisi: dict,
                         cliente: dict) -> str:
         nome = carburante.upper()
         if analisi['prezzo_cliente'] is None:
-            return f"{nome}: your price not available"
+            return f"{nome}: il tuo prezzo non è disponibile"
+        prezzo = f"€ {analisi['prezzo_cliente']:.3f}".replace('.', ',')
         if analisi['posizione'] is None:
-            return (f"{nome}: €{analisi['prezzo_cliente']:.3f}/L — "
-                    f"no up-to-date competitors within {cliente['raggio_km']} km")
-        return (f"{nome}: €{analisi['prezzo_cliente']:.3f}/L — "
-                f"position {analisi['posizione']}/{analisi['totale']} "
-                f"within {cliente['raggio_km']} km — "
-                f"{analisi['diff_vs_min']:+.1f} cents vs cheapest, "
-                f"{analisi['diff_vs_media']:+.1f} vs average")
+            return (f"{nome}: {prezzo} — nessun concorrente aggiornato "
+                    f"entro {cliente['raggio_km']} km")
+        cent = lambda v: f"{v:+.1f}".replace('.', ',')
+        return (f"{nome}: {prezzo} — posizione {analisi['posizione']}/{analisi['totale']} "
+                f"entro {cliente['raggio_km']} km — "
+                f"{cent(analisi['diff_vs_min'])} cent dal più economico, "
+                f"{cent(analisi['diff_vs_media'])} dalla media")

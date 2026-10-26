@@ -18,7 +18,9 @@ import os
 import sys
 from datetime import datetime
 
-from src.pricing.downloader import MimitDownloader
+from datetime import date, timedelta
+
+from src.pricing.downloader import MimitDownloader, data_estrazione
 from src.pricing.parser import MimitParser
 from src.pricing.geocoder import Geocoder
 from src.pricing.finder import CompetitorFinder
@@ -53,6 +55,12 @@ def main():
     print("\nSTEP 1 — Download dati MIMIT")
     downloader = MimitDownloader(data_dir="data/raw")
     paths = downloader.scarica()
+    estrazione = data_estrazione(paths['prezzi'])
+    print(f"  Prezzi MIMIT in vigore alle 8:00 del {estrazione:%d/%m/%Y}" if estrazione
+          else "  ⚠️  Data dei prezzi non leggibile nel file MIMIT")
+    if estrazione and estrazione < date.today() - timedelta(days=1):
+        print("  ⚠️  MIMIT non ha ancora pubblicato i prezzi di ieri: "
+              "il report usera' quelli piu' recenti disponibili")
 
     # ── 2. Parsa dati ──────────────────────────────────────
     print("\nSTEP 2 — Parsing dati")
@@ -96,6 +104,7 @@ def main():
 
         # Analisi posizionamento
         report = analyzer.analizza(cliente, competitor)
+        report['estrazione'] = estrazione
 
         # Anteprima HTML del report (cartella output/, ignorata da git)
         os.makedirs("output", exist_ok=True)
