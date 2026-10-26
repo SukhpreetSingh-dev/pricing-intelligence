@@ -24,7 +24,7 @@ done manually or not at all.
   and vs the average competitor, per fuel type
 - **Data freshness control**: competitor prices not updated in the last
   N days are excluded and reported, since many stations report late
-- **Automated email delivery**, one report per client, multiple recipients
+- **Automated email delivery**, one report per client, multiple recipients (report in Italian, Italian number format)
 - **Graceful degradation**: falls back to cached data when the source is unreachable
 
 
@@ -32,7 +32,7 @@ done manually or not at all.
 
 ![Report example](docs/report-example.png)
 
-*Demo data with fictional stations — the real report reads the daily MIMIT dataset.*
+*Demo data with fictional stations — the real report reads the daily MIMIT dataset (prices in force at 8:00 of the previous day, as published by the Ministry).*
 
 ## Results
 

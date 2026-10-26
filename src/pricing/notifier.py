@@ -3,6 +3,7 @@ PricingNotifier — genera e manda email di report prezzi ai clienti.
 
 Il template e' pensato per le email: solo tabelle e stili inline
 (Gmail e Outlook ignorano <style> e flex), leggibile anche da telefono.
+Testi e numeri in formato italiano (virgola decimale).
 """
 
 import os
@@ -28,8 +29,11 @@ COLORI = {
     'metano':  '#6B21A8',
 }
 NOMI_CARBURANTE = {
-    'benzina': 'Petrol', 'gasolio': 'Diesel', 'gpl': 'LPG', 'metano': 'CNG',
+    'benzina': 'Benzina', 'gasolio': 'Gasolio', 'gpl': 'GPL', 'metano': 'Metano',
 }
+# Il metano si vende al chilo, gli altri al litro
+UNITA = {'metano': 'kg'}
+GIORNI = ['lunedì', 'martedì', 'mercoledì', 'giovedì', 'venerdì', 'sabato', 'domenica']
 ROSSO, VERDE, GRIGIO, TESTO = '#B91C1C', '#047857', '#6B7280', '#111827'
 FONT = ("-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,"
         "sans-serif")
@@ -76,7 +80,7 @@ def pulisci_indirizzo(indirizzo, comune=None) -> str:
         # aggiungi il comune, a meno che l'indirizzo non finisca gia' con quello
         if not parti or not parti[0].lower().endswith(com.lower()):
             parti.append(com)
-    return ', '.join(parti) if parti else 'Address n/a'
+    return ', '.join(parti) if parti else 'Indirizzo non disponibile'
 
 
 def nome_distributore(riga) -> str:
@@ -85,26 +89,48 @@ def nome_distributore(riga) -> str:
     gestore = '' if _vuoto(riga.get('gestore')) else _maiuscole_leggibili(riga.get('gestore'))
     if len(gestore) > 42:
         gestore = gestore[:40].rstrip() + '…'
-    return ' · '.join(p for p in (bandiera, gestore) if p) or 'Station n/a'
+    return ' · '.join(p for p in (bandiera, gestore) if p) or 'Impianto non identificato'
+
+
+# ── Formattazione all'italiana ─────────────────────────────────
+
+def euro(valore) -> str:
+    """1.994 -> '€ 1,994'"""
+    return f"€ {valore:.3f}".replace('.', ',')
+
+
+def _cent(valore) -> str:
+    """+1,5 / −3,0 / +0,0 — virgola decimale e segno meno tipografico."""
+    return f'{valore:+.1f}'.replace('.', ',').replace('-', '−')
 
 
 def formatta_eta(eta) -> str:
     if eta is None or pd.isna(eta):
-        return 'update date n/a'
+        return 'data di aggiornamento non disponibile'
     eta = int(eta)
-    return 'updated today' if eta == 0 else \
-        ('updated 1 day ago' if eta == 1 else f'updated {eta} days ago')
+    if eta == 0:
+        return 'aggiornato oggi'
+    return 'aggiornato ieri' if eta == 1 else f'aggiornato {eta} giorni fa'
 
 
 def formatta_data(data) -> str:
     if data is None or pd.isna(data):
-        return 'n/a'
+        return 'n.d.'
     return data.strftime('%d/%m/%Y %H:%M')
 
 
-def _cent(valore) -> str:
-    """+1.5 / −3.0 / 0.0 con il segno meno tipografico."""
-    return f'{valore:+.1f}'.replace('-', '−')
+def formatta_giorno(giorno) -> str:
+    """date(2026, 10, 25) -> 'domenica 25/10/2026'"""
+    return f"{GIORNI[giorno.weekday()]} {giorno:%d/%m/%Y}"
+
+
+def giorno_prezzi(report: dict):
+    """Il giorno a cui si riferiscono i prezzi: dalla riga di estrazione MIMIT,
+    altrimenti dall'ultima comunicazione presente nei dati."""
+    if report.get('estrazione'):
+        return report['estrazione']
+    rif = report.get('riferimento')
+    return None if rif is None or pd.isna(rif) else rif.date()
 
 
 class PricingNotifier:
@@ -150,9 +176,10 @@ class PricingNotifier:
         if isinstance(emails, str):
             emails = [emails]
 
+        giorno = giorno_prezzi(report)
         msg = MIMEMultipart('alternative')
-        msg['Subject'] = (f"Fuel price report — {cliente['nome']} — "
-                          f"{datetime.now().strftime('%d/%m/%Y')}")
+        msg['Subject'] = (f"Prezzi carburanti — {cliente['nome']} — "
+                          f"{'prezzi del ' + format(giorno, '%d/%m/%Y') if giorno else datetime.now().strftime('%d/%m/%Y')}")
         msg['From'] = self.mittente
         msg['To'] = ', '.join(emails)
         msg.attach(MIMEText(self._template_html(report), 'html', 'utf-8'))
@@ -175,14 +202,18 @@ class PricingNotifier:
         else:
             sottotitolo = escape(cliente.get('indirizzo', ''))
 
-        tipo = 'self-service' if cliente.get('is_self', True) else 'full-service'
+        giorno = giorno_prezzi(report)
+        quando = (f"prezzi in vigore alle 8:00 di {formatta_giorno(giorno)}"
+                  if giorno else "data dei prezzi non disponibile")
+        tipo = 'self-service' if cliente.get('is_self', True) else 'servito'
+        max_eta = cliente.get('max_eta_giorni', MAX_ETA_GIORNI_DEFAULT)
         sezioni = ''.join(self._sezione_carburante(carb, analisi, cliente)
                           for carb, analisi in report['carburanti'].items())
 
         return f"""<!doctype html>
-<html><head><meta charset="utf-8">
+<html lang="it"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Fuel price report — {escape(cliente['nome'])}</title></head>
+<title>Prezzi carburanti — {escape(cliente['nome'])}</title></head>
 <body style="margin:0;padding:0;background:#F3F4F6;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
   style="background:#F3F4F6;font-family:{FONT};color:{TESTO};">
@@ -193,26 +224,28 @@ class PricingNotifier:
 
   <tr><td style="padding:24px 24px 16px;border-bottom:1px solid #E5E7EB;">
     <div style="font-size:12px;color:{GRIGIO};text-transform:uppercase;
-      letter-spacing:.06em;">Fuel price report · prices as of {formatta_data(report.get('riferimento'))}</div>
+      letter-spacing:.06em;">Report prezzi carburanti · {quando}</div>
     <div style="font-size:22px;font-weight:700;margin:6px 0 4px;">
       {escape(cliente['nome'])}</div>
     <div style="font-size:13px;color:{GRIGIO};line-height:1.5;">{sottotitolo}</div>
     <div style="font-size:13px;color:{GRIGIO};margin-top:8px;">
-      Competitors within <strong style="color:{TESTO};">{cliente['raggio_km']} km</strong>
-      · {tipo} prices</div>
+      Concorrenti entro <strong style="color:{TESTO};">{cliente['raggio_km']} km</strong>
+      · prezzi {tipo}</div>
   </td></tr>
 
   {sezioni}
 
   <tr><td style="padding:16px 24px 24px;font-size:11px;color:#9CA3AF;
     line-height:1.6;border-top:1px solid #E5E7EB;">
-    Source: MIMIT open data, prices as reported by each station
-    (latest update in the dataset: {formatta_data(report.get('riferimento'))}).
-    Report generated on {datetime.now().strftime('%d/%m/%Y %H:%M')}.
-    LPG and CNG include full-service prices. Competitor prices not updated in
-    the last {cliente.get('max_eta_giorni', MAX_ETA_GIORNI_DEFAULT)} days are left out.
-    “vs you” = competitor price minus your price, in euro cents:
-    <span style="color:{ROSSO};">red</span> = cheaper than you.
+    Fonte: open data del Ministero delle Imprese e del Made in Italy (MIMIT).
+    Sono i prezzi comunicati dai gestori, che il Ministero pubblica ogni mattina
+    con i valori in vigore alle 8:00 del giorno precedente.
+    Report generato il {datetime.now().strftime('%d/%m/%Y alle %H:%M')}.
+    Per GPL e metano sono inclusi anche i prezzi del servito.
+    Non sono considerati i concorrenti che non aggiornano il prezzo da più di
+    {max_eta} giorni.
+    «Diff.» = prezzo del concorrente meno il tuo, in centesimi:
+    <span style="color:{ROSSO};">rosso</span> = costa meno di te.
   </td></tr>
 
 </table>
@@ -223,40 +256,41 @@ class PricingNotifier:
                             cliente: dict) -> str:
         colore = COLORI.get(carburante, '#1A56DB')
         nome = NOMI_CARBURANTE.get(carburante, carburante.title())
+        unita = UNITA.get(carburante, 'L')
 
         return f"""
   <tr><td style="padding:20px 24px 4px;">
     <div style="font-size:15px;font-weight:700;color:{colore};
       text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;">
       {nome}</div>
-    {self._riquadro(analisi, colore)}
+    {self._riquadro(analisi, colore, unita)}
     {self._classifica(analisi, cliente, colore)}
   </td></tr>"""
 
-    def _riquadro(self, analisi: dict, colore: str) -> str:
+    def _riquadro(self, analisi: dict, colore: str, unita: str) -> str:
         """Riquadro in alto: il tuo prezzo e come sei posizionato."""
         prezzo = analisi['prezzo_cliente']
 
         if prezzo is None:
-            return self._avviso('Your price for this fuel was not found in '
-                                'MIMIT data. Competitors are listed below.')
+            return self._avviso('Il tuo prezzo per questo carburante non è presente '
+                                'nei dati MIMIT. Sotto trovi comunque i concorrenti.')
 
         eta_c = analisi.get('eta_cliente')
         riga_eta = escape(formatta_eta(eta_c))
         if eta_c is not None and eta_c > analisi['max_eta_giorni']:
             riga_eta = (f'<span style="color:{ROSSO};font-weight:600;">⏳ '
-                        f'{riga_eta} — check it is still correct</span>')
+                        f'{riga_eta} — controlla che sia ancora giusto</span>')
 
         if analisi['posizione'] is None:
-            dettaglio = 'No up-to-date competitor prices within range.'
+            dettaglio = 'Nessun prezzo aggiornato dei concorrenti nel raggio.'
         else:
             dettaglio = (
-                f"<strong>{analisi['posizione']}</strong> of "
-                f"{analisi['totale']} stations · "
-                f"{self._colorato(analisi['diff_vs_min'])} vs cheapest "
-                f"(€{analisi['prezzo_min']:.3f}) · "
-                f"{self._colorato(analisi['diff_vs_media'])} vs average "
-                f"(€{analisi['prezzo_medio']:.3f})")
+                f"<strong>{analisi['posizione']}°</strong> su "
+                f"{analisi['totale']} impianti · "
+                f"{self._colorato(analisi['diff_vs_min'])} rispetto al più economico "
+                f"({euro(analisi['prezzo_min'])}) · "
+                f"{self._colorato(analisi['diff_vs_media'])} rispetto alla media "
+                f"({euro(analisi['prezzo_medio'])})")
             dettaglio += (f"<div style=\"margin-top:4px;\">"
                           f"{escape(analisi['raccomandazione'])}</div>")
 
@@ -264,9 +298,9 @@ class PricingNotifier:
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
       style="background:#F9FAFB;border-left:4px solid {colore};border-radius:6px;">
     <tr><td style="padding:12px 14px;">
-      <div style="font-size:12px;color:{GRIGIO};">Your price · {riga_eta}</div>
+      <div style="font-size:12px;color:{GRIGIO};">Il tuo prezzo · {riga_eta}</div>
       <div style="font-size:24px;font-weight:700;margin:2px 0 6px;">
-        €{prezzo:.3f}<span style="font-size:13px;font-weight:400;color:{GRIGIO};">/L</span></div>
+        {euro(prezzo)}<span style="font-size:13px;font-weight:400;color:{GRIGIO};">/{unita}</span></div>
       <div style="font-size:13px;line-height:1.6;color:#374151;">{dettaglio}</div>
     </td></tr></table>"""
 
@@ -291,21 +325,26 @@ class PricingNotifier:
             if pos_c > len(df) + 1:
                 righe.append(f"""
       <tr><td colspan="3" style="padding:4px 10px;text-align:center;
-        color:#9CA3AF;font-size:13px;">⋯ {pos_c - len(df) - 1} more ⋯</td></tr>""")
+        color:#9CA3AF;font-size:13px;">⋯ {'1 altro' if pos_c - len(df) == 2 else f'altri {pos_c - len(df) - 1}'} ⋯</td></tr>""")
             righe.append(self._riga_cliente(analisi, cliente, colore))
 
         n = len(df)
         if analisi['n_competitor'] > n:
-            titolo = (f"Top {n} cheapest of {analisi['n_competitor']} competitors "
-                      f"within {cliente['raggio_km']} km")
+            titolo = (f"I {n} più economici su {analisi['n_competitor']} concorrenti "
+                      f"entro {cliente['raggio_km']} km")
+        elif n == 1:
+            titolo = f"L'unico concorrente entro {cliente['raggio_km']} km"
         else:
-            titolo = f"All {n} competitors within {cliente['raggio_km']} km"
+            titolo = f"Tutti i {n} concorrenti entro {cliente['raggio_km']} km"
 
         esclusi = ''
-        if analisi.get('n_esclusi'):
+        k = analisi.get('n_esclusi')
+        if k:
+            testo = (f"1 concorrente escluso perché non aggiorna il prezzo"
+                     if k == 1 else
+                     f"{k} concorrenti esclusi perché non aggiornano il prezzo")
             esclusi = (f"<div style=\"font-size:11px;color:#9CA3AF;margin-top:6px;\">"
-                       f"{analisi['n_esclusi']} competitor price(s) older than "
-                       f"{analisi['max_eta_giorni']} days left out.</div>")
+                       f"{testo} da più di {analisi['max_eta_giorni']} giorni.</div>")
 
         return f"""
     <div style="font-size:12px;color:{GRIGIO};margin:14px 0 6px;">{titolo}</div>
@@ -314,17 +353,17 @@ class PricingNotifier:
       <tr style="color:{GRIGIO};font-size:11px;text-transform:uppercase;
         letter-spacing:.04em;">
         <td style="padding:6px 10px;border-bottom:2px solid {colore};width:28px;">#</td>
-        <td style="padding:6px 10px;border-bottom:2px solid {colore};">Station</td>
+        <td style="padding:6px 10px;border-bottom:2px solid {colore};">Impianto</td>
         <td style="padding:6px 10px;border-bottom:2px solid {colore};
-          text-align:right;white-space:nowrap;">Price · vs you</td>
+          text-align:right;white-space:nowrap;">Prezzo · diff.</td>
       </tr>
       {''.join(righe)}
     </table>{esclusi}"""
 
     def _riga_competitor(self, row) -> str:
+        km = f"{row['distanza_km']:.1f}".replace('.', ',')
         dettagli = (f"{escape(pulisci_indirizzo(row.get('indirizzo'), row.get('comune')))}"
-                    f"<br>{row['distanza_km']:.1f} km away · "
-                    f"{escape(formatta_eta(row.get('eta_giorni')))}")
+                    f"<br>a {km} km · {escape(formatta_eta(row.get('eta_giorni')))}")
         diff = row.get('diff_vs_cliente')
         vs = '' if diff is None or pd.isna(diff) else \
             f"<div style=\"font-size:12px;\">{self._colorato(diff, invertito=True)}</div>"
@@ -338,7 +377,7 @@ class PricingNotifier:
         </td>
         <td style="padding:10px;border-bottom:1px solid #F3F4F6;text-align:right;
           vertical-align:top;white-space:nowrap;">
-          <div style="font-weight:700;">€{row['prezzo']:.3f}</div>{vs}
+          <div style="font-weight:700;">{euro(row['prezzo'])}</div>{vs}
         </td>
       </tr>"""
 
@@ -348,11 +387,11 @@ class PricingNotifier:
         <td style="padding:10px;border-bottom:1px solid #FDE68A;font-weight:700;
           vertical-align:top;">{analisi['posizione']}</td>
         <td style="padding:10px;border-bottom:1px solid #FDE68A;vertical-align:top;">
-          <div style="font-weight:700;">▶ YOU — {escape(cliente['nome'])}</div>
+          <div style="font-weight:700;">▶ TU — {escape(cliente['nome'])}</div>
         </td>
         <td style="padding:10px;border-bottom:1px solid #FDE68A;text-align:right;
           vertical-align:top;font-weight:700;white-space:nowrap;">
-          €{analisi['prezzo_cliente']:.3f}</td>
+          {euro(analisi['prezzo_cliente'])}</td>
       </tr>"""
 
     @staticmethod
@@ -365,7 +404,7 @@ class PricingNotifier:
         buono = valore > 0 if invertito else valore < 0
         colore = ROSSO if cattivo else (VERDE if buono else GRIGIO)
         return (f'<span style="color:{colore};font-weight:600;">'
-                f'{_cent(valore)} ¢</span>')
+                f'{_cent(valore)} cent</span>')
 
     @staticmethod
     def _avviso(testo: str) -> str:
