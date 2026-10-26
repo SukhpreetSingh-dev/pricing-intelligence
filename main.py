@@ -2,7 +2,12 @@
 Pricing Intelligence — Entry point principale.
 
 Uso:
-    python3 main.py
+    python3 main.py                  # lancio a mano: manda sempre il report
+    python3 main.py --automatico     # da cron: una sola volta al giorno, solo
+                                     # quando MIMIT ha pubblicato i prezzi di ieri
+    python3 main.py --automatico --anche-se-vecchi
+                                     # ultimo tentativo della mattina: manda
+                                     # comunque, con i prezzi piu' recenti che ci sono
 
 Cosa fa:
     1. Scarica i dati MIMIT aggiornati
@@ -13,12 +18,11 @@ Cosa fa:
     6. Manda l'email di report
 """
 
+import argparse
 import json
 import os
 import sys
-from datetime import datetime
-
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from src.pricing.downloader import MimitDownloader, data_estrazione
 from src.pricing.parser import MimitParser
@@ -30,6 +34,31 @@ from src.pricing.notifier import PricingNotifier
 
 
 CLIENTI_PATH = "clienti.json"
+CARTELLA_SEGNALI = "output"
+
+
+def segnale_inviato(oggi: date) -> str:
+    """File che segna 'report di oggi gia' inviato' (evita doppi invii da cron)."""
+    return os.path.join(CARTELLA_SEGNALI, f".inviato_{oggi:%Y%m%d}")
+
+
+def decidi_invio(oggi: date, estrazione, gia_inviato: bool,
+                 anche_se_vecchi: bool) -> tuple[bool, str]:
+    """
+    In modalita' automatica: procedere o aspettare il prossimo tentativo?
+
+    MIMIT pubblica ogni mattina i prezzi delle 8:00 del giorno prima, a un
+    orario non dichiarato. Cron prova piu' volte: si manda appena i dati
+    sono quelli di ieri, una sola volta al giorno.
+    """
+    if gia_inviato:
+        return False, "report di oggi gia' inviato"
+    aggiornati = estrazione is not None and estrazione >= oggi - timedelta(days=1)
+    if aggiornati:
+        return True, "prezzi di ieri disponibili"
+    if anche_se_vecchi:
+        return True, "ultimo tentativo: invio con i prezzi piu' recenti disponibili"
+    return False, "MIMIT non ha ancora pubblicato i prezzi di ieri: riprovo al prossimo giro"
 
 
 def carica_clienti() -> list:
@@ -46,6 +75,18 @@ def carica_clienti() -> list:
 
 
 def main():
+    args = argparse.ArgumentParser(description="Report prezzi carburanti")
+    args.add_argument("--automatico", action="store_true",
+                      help="una volta al giorno, solo con i prezzi di ieri (per cron)")
+    args.add_argument("--anche-se-vecchi", action="store_true",
+                      help="con --automatico: manda anche se i prezzi non sono di ieri")
+    args = args.parse_args()
+    oggi = date.today()
+
+    if args.automatico and os.path.exists(segnale_inviato(oggi)):
+        print(f"{datetime.now():%d/%m/%Y %H:%M} — report di oggi gia' inviato, niente da fare")
+        return
+
     print("=" * 55)
     print("  PRICING INTELLIGENCE — AVVIO")
     print(f"  {datetime.now().strftime('%d/%m/%Y %H:%M')}")
@@ -58,7 +99,12 @@ def main():
     estrazione = data_estrazione(paths['prezzi'])
     print(f"  Prezzi MIMIT in vigore alle 8:00 del {estrazione:%d/%m/%Y}" if estrazione
           else "  ⚠️  Data dei prezzi non leggibile nel file MIMIT")
-    if estrazione and estrazione < date.today() - timedelta(days=1):
+    if args.automatico:
+        procedi, motivo = decidi_invio(oggi, estrazione, False, args.anche_se_vecchi)
+        print(f"  Modalita' automatica: {motivo}")
+        if not procedi:
+            return
+    elif estrazione and estrazione < oggi - timedelta(days=1):
         print("  ⚠️  MIMIT non ha ancora pubblicato i prezzi di ieri: "
               "il report usera' quelli piu' recenti disponibili")
 
@@ -127,6 +173,13 @@ def main():
           f"{esiti['errore']} errori invio, "
           f"{esiti['non localizzato']} clienti non localizzati")
     print("=" * 55)
+
+    # In automatico: segna il giorno come fatto solo se almeno una mail e' partita.
+    # Se l'invio fallisce (es. rete giu'), il prossimo giro di cron riprova.
+    if args.automatico and esiti['inviata'] > 0:
+        os.makedirs(CARTELLA_SEGNALI, exist_ok=True)
+        with open(segnale_inviato(oggi), "w") as f:
+            f.write(datetime.now().isoformat())
 
 
 if __name__ == "__main__":

@@ -273,3 +273,17 @@ def test_data_estrazione_dal_file(tmp_path):
     g = tmp_path / 'vuoto.csv'
     g.write_text('idImpianto|descCarburante\n')
     assert data_estrazione(str(g)) is None
+
+
+# ── avvio automatico da cron ──
+
+def test_decidi_invio():
+    from datetime import date
+    from main import decidi_invio
+    oggi = date(2026, 10, 27)
+    ieri, vecchio = date(2026, 10, 26), date(2026, 10, 24)
+    assert decidi_invio(oggi, ieri, False, False)[0] is True        # dati nuovi: manda
+    assert decidi_invio(oggi, vecchio, False, False)[0] is False    # dati vecchi: aspetta
+    assert decidi_invio(oggi, None, False, False)[0] is False       # data illeggibile: aspetta
+    assert decidi_invio(oggi, vecchio, False, True)[0] is True      # ultimo tentativo: manda
+    assert decidi_invio(oggi, ieri, True, True)[0] is False         # gia' inviato: mai due volte

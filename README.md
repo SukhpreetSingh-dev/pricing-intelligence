@@ -65,6 +65,19 @@ python main.py
 python -m pytest -q                       # tests on synthetic data
 ```
 
+### Daily automatic run (cron)
+
+MIMIT publishes each morning the prices in force at 8:00 of the previous day,
+at an undeclared time. `--automatico` sends the report once a day, as soon as
+those prices are available; cron simply tries several times in the morning:
+
+```cron
+30 8-11 * * * cd ~/pricing-intelligence && venv/bin/python main.py --automatico >> logs/report.log 2>&1
+30 12   * * * cd ~/pricing-intelligence && venv/bin/python main.py --automatico --anche-se-vecchi >> logs/report.log 2>&1
+```
+
+The last run sends with the newest prices available even if MIMIT is late.
+
 ### Client configuration (`clienti.json`)
 
 | Field | Meaning |
