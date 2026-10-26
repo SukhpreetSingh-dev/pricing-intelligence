@@ -73,7 +73,7 @@ python -m pytest -q                       # tests on synthetic data
 | `raggio_km` | Competitor search radius |
 | `top_n` | Rows in the report table (statistics always use every competitor in the radius) |
 | `is_self` | `true` = self-service prices, `false` = full-service (LPG and CNG always use both) |
-| `max_eta_giorni` | Competitor prices older than this many days are excluded (default 3) |
+| `max_eta_giorni` | Competitor prices older than this many days are excluded (default 7) |
 
 ## Data
 

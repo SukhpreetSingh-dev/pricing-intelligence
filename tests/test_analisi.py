@@ -219,3 +219,27 @@ def _report_da(df, **extra):
                                             cliente['carburanti'], cliente['is_self'],
                                             cliente['id_impianto'])
     return PricingAnalyzer(df).analizza(cliente, comp)
+
+
+def test_indirizzi_reali_mimit():
+    # esempi presi dal dataset MIMIT di ottobre 2026
+    assert pulisci_indirizzo('VIA S.S.   12 KM.236+614 46036, BORGO MANTOVANO (MN) 44  46036',
+                             'BORGO MANTOVANO') == 'Via S.S. 12 Km.236+614, Borgo Mantovano'
+    assert pulisci_indirizzo('VIA VIA STATALE NORD 153 41037, MIRANDOLA (MO)  41037',
+                             'MIRANDOLA') == 'Via Statale Nord 153, Mirandola'
+    assert pulisci_indirizzo('Via Statale Sud 14  41037', 'MIRANDOLA') == \
+        'Via Statale Sud 14, Mirandola'
+    # il nome del comune dentro la via NON va tagliato
+    assert pulisci_indirizzo('VIA PROVINCIALE PER CONCORDIA 70/D 41037', 'CONCORDIA') == \
+        'Via Provinciale Per Concordia 70/D, Concordia'
+
+
+def test_limite_eta_default_7_giorni():
+    from src.pricing.analyzer import MAX_ETA_GIORNI_DEFAULT
+    c = _cliente()
+    del c['max_eta_giorni']
+    df = _df_mimit()
+    b = _report_da(df, max_eta_giorni=MAX_ETA_GIORNI_DEFAULT)['carburanti']['benzina']
+    assert MAX_ETA_GIORNI_DEFAULT == 7
+    assert b['n_esclusi'] == 0                    # 1005 ha 6 giorni: ora resta dentro
+    assert b['prezzo_min'] == pytest.approx(1.699)
