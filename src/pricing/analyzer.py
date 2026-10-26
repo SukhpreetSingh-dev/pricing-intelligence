@@ -70,8 +70,23 @@ def aggiungi_rank(df: pd.DataFrame, prezzo_cliente: Optional[float]) -> pd.DataF
 
 
 def eta_giorni(date: pd.Series, riferimento: pd.Timestamp) -> pd.Series:
-    """Giorni trascorsi da ogni data al riferimento (NaN se data mancante)."""
-    return (riferimento.normalize() - date.dt.normalize()).dt.days
+    """
+    Giorni trascorsi da ogni data al riferimento (NaN se data mancante).
+    Una data nel futuro (errore del gestore) conta come 'oggi', non come negativa.
+    """
+    return (riferimento.normalize() - date.dt.normalize()).dt.days.clip(lower=0)
+
+
+def data_riferimento(date: pd.Series, adesso: Optional[pd.Timestamp] = None) -> pd.Timestamp:
+    """
+    Il 'giorno di oggi' dei dati: la comunicazione piu' recente NON nel futuro.
+
+    Basta un solo gestore che scrive una data sbagliata (es. 2027) per far
+    sembrare vecchi tutti gli altri prezzi d'Italia: quelle date le ignoriamo.
+    """
+    adesso = adesso or pd.Timestamp.now()
+    valide = date[date <= adesso]
+    return valide.max() if not valide.empty else adesso
 
 
 class PricingAnalyzer:
@@ -85,7 +100,7 @@ class PricingAnalyzer:
         self.df = df_mimit
         # Riferimento = comunicazione piu' recente nel dataset, non "adesso":
         # cosi' l'eta' resta corretta anche se si usano dati in cache.
-        self.riferimento = df_mimit['data_comunicazione'].max()
+        self.riferimento = data_riferimento(df_mimit['data_comunicazione'])
 
     def analizza(self, cliente: dict, competitor: dict) -> dict:
         """

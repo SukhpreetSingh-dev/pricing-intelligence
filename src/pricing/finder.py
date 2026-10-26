@@ -33,6 +33,20 @@ def haversine_km(lat1: float, lon1: float,
     return 2 * RAGGIO_TERRA_KM * np.arcsin(np.sqrt(a))
 
 
+def un_prezzo_per_impianto(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Un solo prezzo per impianto: il piu' recente.
+
+    Nei dati MIMIT lo stesso impianto puo' comparire piu' volte per lo stesso
+    carburante (comunicazioni doppie, oppure GPL sia self che servito).
+    Senza questo filtro un impianto conterebbe due volte in classifica e media.
+    """
+    if df.empty or 'data_comunicazione' not in df.columns:
+        return df
+    return (df.sort_values('data_comunicazione', ascending=False, na_position='last')
+              .drop_duplicates('id_impianto', keep='first'))
+
+
 class CompetitorFinder:
     """
     Trova i distributori competitor entro un raggio dal cliente.
@@ -98,8 +112,9 @@ class CompetitorFinder:
                             [carburante],
                             filtro_self(carburante, is_self),
                             escludi_id)
-            risultati[carburante] = (df.sort_values(['prezzo', 'distanza_km'])
-                                       .reset_index(drop=True))
+            risultati[carburante] = (un_prezzo_per_impianto(df)
+                                     .sort_values(['prezzo', 'distanza_km'])
+                                     .reset_index(drop=True))
         return risultati
 
     def top_n_per_carburante(self,

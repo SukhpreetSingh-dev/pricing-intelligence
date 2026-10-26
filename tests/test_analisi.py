@@ -183,3 +183,39 @@ def test_cliente_fuori_dal_top_n_compare_in_fondo():
     b = html.split('Petrol')[1].split('LPG')[0]
     assert b.index('Gestore 1001') < b.index('YOU — Test')
     assert 'YOU — Test' in b
+
+
+# ── robustezza sui dati MIMIT reali ──
+
+def test_data_futura_non_rende_vecchi_gli_altri():
+    df = _df_mimit()
+    # un gestore comunica una data sbagliata nel 2027
+    df.loc[df['id_impianto'] == '1003', 'data_comunicazione'] = pd.Timestamp('2027-12-30')
+    finder = CompetitorFinder(df)
+    c = localizza_clienti([_cliente()], df, finder)[0]
+    comp = finder.competitor_per_carburante(c['lat'], c['lon'], 10, ['benzina'], True, CLIENTE_ID)
+    analyzer = PricingAnalyzer(df)
+    assert analyzer.riferimento < pd.Timestamp('2027-01-01')
+    b = analyzer.analizza(c, comp)['carburanti']['benzina']
+    assert b['n_esclusi'] == 1                          # solo 1005, vecchio davvero
+    assert '1003' in set(b['top_n']['id_impianto'])     # la data futura conta come "oggi"
+
+
+def test_impianto_doppio_conta_una_volta():
+    df = _df_mimit()
+    riga = df[(df['id_impianto'] == '1001') & (df['carburante'] == 'benzina') & df['is_self']].copy()
+    riga['prezzo'] = 1.700
+    riga['data_comunicazione'] = OGGI - pd.Timedelta(days=1)   # comunicazione piu' vecchia
+    df = pd.concat([df, riga], ignore_index=True)
+    b = _report_da(df)['carburanti']['benzina']
+    assert b['n_competitor'] == 4                       # non 5
+    assert b['prezzo_min'] == pytest.approx(1.799)      # vince il prezzo piu' recente
+
+
+def _report_da(df, **extra):
+    finder = CompetitorFinder(df)
+    cliente = localizza_clienti([_cliente(**extra)], df, finder)[0]
+    comp = finder.competitor_per_carburante(cliente['lat'], cliente['lon'], cliente['raggio_km'],
+                                            cliente['carburanti'], cliente['is_self'],
+                                            cliente['id_impianto'])
+    return PricingAnalyzer(df).analizza(cliente, comp)
